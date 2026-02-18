@@ -91,11 +91,9 @@ function AgentCard({ agent, gatewayPort, gatewayToken }: { agent: Agent; gateway
   if (gatewayToken) sessionUrl += `&token=${encodeURIComponent(gatewayToken)}`;
 
   return (
-    <a
-      href={sessionUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 hover:border-[var(--accent)] transition-colors cursor-pointer"
+    <div
+      onClick={() => window.open(sessionUrl, "_blank")}
+      className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 hover:border-[var(--accent)] transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 mb-3">
         <span className="text-3xl">{agent.emoji}</span>
@@ -131,7 +129,7 @@ function AgentCard({ agent, gatewayPort, gatewayToken }: { agent: Agent; gateway
           </div>
         )}
       </div>
-    </a>
+    </div>
   );
 }
 
