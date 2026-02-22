@@ -245,8 +245,13 @@ async function testDiscord(
 function testAgentSession(agentId: string, sessionKey?: string, platform?: string, replyAccount?: string, replyTo?: string): AgentTestResult {
   const startTime = Date.now();
   try {
-    const args = [`openclaw`, `agent`, `--agent`, agentId, `--message`, `Health check: reply with OK`, `--json`, `--timeout`, `30`];
-    if (sessionKey) args.push(`--session-id`, sessionKey);
+    const args: string[] = [
+      `openclaw`, `agent`,
+      `--agent`, agentId,
+      `--message`, `"Health check: reply with OK"`,
+      `--json`, `--timeout`, `30`,
+    ];
+    if (sessionKey) args.push(`--session-id`, `"${sessionKey}"`);
     if (platform) {
       args.push(`--deliver`, `--channel`, platform);
       if (replyAccount) args.push(`--reply-account`, replyAccount);
