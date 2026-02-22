@@ -63,7 +63,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "home.noResponseData": "暂无响应时间数据",
     "home.testPlatforms": "🧪 测试平台连通",
     "home.testingPlatforms": "⏳ 测试平台中...",
-    "home.testSessions": "🔌 测试 Session",
+    "home.testSessions": "🔌 测试 Agent",
     "home.testingSessions": "⏳ 测试中...",
 
     // agent card
@@ -228,7 +228,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "home.noResponseData": "No response time data",
     "home.testPlatforms": "🧪 Test Platforms",
     "home.testingPlatforms": "⏳ Testing Platforms...",
-    "home.testSessions": "🔌 Test Sessions",
+    "home.testSessions": "🔌 Test Agents",
     "home.testingSessions": "⏳ Testing...",
 
     // agent card
