@@ -40,7 +40,7 @@ export default function AlertsPage() {
   const [checking, setChecking] = useState(false);
   const [checkResults, setCheckResults] = useState<string[]>([]);
   const [lastCheckTime, setLastCheckTime] = useState<string>("");
-  const [checkInterval, setCheckInterval] = useState(5); // 默认 5 分钟检查一次
+  const [checkInterval, setCheckInterval] = useState(10); // 默认 10 分钟检查一次
 
   // 加载配置
   useEffect(() => {
