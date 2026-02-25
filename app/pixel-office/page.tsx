@@ -205,7 +205,7 @@ export default function PixelOfficePage() {
   // Load photograph for right room wall
   useEffect(() => {
     const img = new Image()
-    img.src = '/assets/pixel-office/photograph.png'
+    img.src = '/assets/pixel-office/photograph.webp'
     img.onload = () => { photographRef.current = img }
   }, [])
 
