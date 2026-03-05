@@ -215,6 +215,7 @@ export default function PixelOfficePage() {
   const savedLayoutRef = useRef<OfficeLayout | null>(cachedSavedLayout)
   const animationFrameIdRef = useRef<number | null>(null)
   const prevAgentStatesRef = useRef<Map<string, string>>(new Map(cachedPrevAgentStates))
+  const seenSubagentEventKeysRef = useRef<Map<string, number>>(new Map())
 
   const [agents, setAgents] = useState<AgentActivity[]>(cachedAgents)
   const [hoveredAgentId, setHoveredAgentId] = useState<number | null>(null)
@@ -604,7 +605,8 @@ export default function PixelOfficePage() {
             ch.systemRoleType === 'gateway_sre' &&
             ch.systemStatus === 'down' &&
             ch.state === 'idle'
-          if (!workingCharIds.has(ch.id) && !isSreBlackword) continue
+          const hasInjectedSnippet = ch.codeSnippets.length > 0
+          if (!workingCharIds.has(ch.id) && !isSreBlackword && !hasInjectedSnippet) continue
           if (ch.codeSnippets.length === 0) continue
           const anchorX = ox + ch.x * zoom
           const anchorY = containerTop + oy + (ch.y - (isSreBlackword ? 24 : 10)) * zoom
@@ -712,10 +714,47 @@ export default function PixelOfficePage() {
         setAgents(newAgents)
         cachedAgents = newAgents
 
-        if (officeRef.current) {
-          syncAgentsToOffice(newAgents, officeRef.current, agentIdMapRef.current, nextIdRef.current)
+        const office = officeRef.current
+        if (office) {
+          syncAgentsToOffice(newAgents, office, agentIdMapRef.current, nextIdRef.current)
           cachedAgentIdMap = new Map(agentIdMapRef.current)
           cachedNextCharacterId = nextIdRef.current.current
+
+          const seen = seenSubagentEventKeysRef.current
+          const now = Date.now()
+          for (const [key, ts] of seen.entries()) {
+            if (now - ts > 24 * 60 * 60 * 1000) seen.delete(key)
+          }
+          for (const agent of newAgents) {
+            const parentCharId = agentIdMapRef.current.get(agent.agentId)
+            if (typeof parentCharId !== 'number') continue
+            if (!agent.subagents?.length) continue
+            for (const sub of agent.subagents) {
+              if (!sub.activityEvents?.length) continue
+              const subKey = sub.sessionKey ? `${sub.sessionKey}::${sub.toolId}` : sub.toolId
+              const subCharId = office.getSubagentId(parentCharId, subKey)
+              if (subCharId == null) continue
+
+              const orderedEvents = (sub.activityEvents || []).slice().sort((a, b) => a.at - b.at)
+              let emittedNew = false
+              for (const event of orderedEvents) {
+                const uniq = `${agent.agentId}:${subKey}:${event.key}`
+                if (seen.has(uniq)) continue
+                seen.set(uniq, now)
+                office.pushCodeSnippet(subCharId, event.text)
+                emittedNew = true
+              }
+
+              // Fallback: if no parsed activity events yet, show subagent task label once.
+              if (!emittedNew && orderedEvents.length === 0 && sub.label) {
+                const fallbackUniq = `${agent.agentId}:${subKey}:label`
+                if (!seen.has(fallbackUniq)) {
+                  seen.set(fallbackUniq, now)
+                  office.pushCodeSnippet(subCharId, `task: ${sub.label}`)
+                }
+              }
+            }
+          }
         }
 
         // Play sound when agent transitions to waiting

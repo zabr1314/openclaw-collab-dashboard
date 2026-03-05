@@ -4,6 +4,8 @@ export interface SubagentInfo {
   toolId: string
   label: string
   sessionKey?: string
+  childSessionKey?: string
+  activityEvents?: Array<{ key: string; text: string; at: number }>
 }
 
 export interface AgentActivity {

@@ -1222,6 +1222,23 @@ export class OfficeState {
     }
   }
 
+  /** Push an explicit snippet bubble (e.g. subagent session updates). */
+  pushCodeSnippet(id: number, text: string): void {
+    const ch = this.characters.get(id)
+    if (!ch || ch.isCat || ch.isLobster) return
+    const compact = text.replace(/\s+/g, ' ').trim()
+    if (!compact) return
+    ch.codeSnippets.push({
+      text: compact.length > 90 ? `${compact.slice(0, 89)}…` : compact,
+      age: 0,
+      x: (Math.random() - 0.5) * 20,
+      y: 0,
+    })
+    if (ch.codeSnippets.length > 4) {
+      ch.codeSnippets = ch.codeSnippets.slice(-4)
+    }
+  }
+
   /** Dismiss bubble on click — permission: instant, waiting: quick fade */
   dismissBubble(id: number): void {
     const ch = this.characters.get(id)
@@ -1324,9 +1341,13 @@ export class OfficeState {
       // Code snippet particles:
       // - Working agents: regular coding snippets
       // - Gateway SRE in down state: ops slang ("运维黑话")
-      if (isSreFirefighting && !ch.isCat && !ch.isLobster) {
+      // - Subagent/session-driven snippets can be injected externally via pushCodeSnippet().
+      if (!ch.isCat && !ch.isLobster) {
         for (const s of ch.codeSnippets) s.age += dt
         ch.codeSnippets = ch.codeSnippets.filter(s => s.age < CODE_SNIPPET_LIFETIME)
+      }
+
+      if (isSreFirefighting && !ch.isCat && !ch.isLobster) {
         if (ch.codeSnippets.length < 3 && Math.random() < dt * SRE_BLACKWORD_SPAWN_RATE) {
           ch.codeSnippets.push({
             text: SRE_BLACKWORDS[Math.floor(Math.random() * SRE_BLACKWORDS.length)],
@@ -1335,10 +1356,7 @@ export class OfficeState {
             y: 0,
           })
         }
-      } else if (ch.isActive && ch.state === CharacterState.TYPE && !ch.isCat && !ch.isLobster) {
-        // Age existing snippets and remove expired ones
-        for (const s of ch.codeSnippets) s.age += dt
-        ch.codeSnippets = ch.codeSnippets.filter(s => s.age < CODE_SNIPPET_LIFETIME)
+      } else if (ch.isActive && ch.state === CharacterState.TYPE && !ch.isCat && !ch.isLobster && !ch.isSubagent) {
         // Spawn new snippet randomly
         if (ch.codeSnippets.length < 2 && Math.random() < dt * CODE_SNIPPET_SPAWN_RATE) {
           ch.codeSnippets.push({
@@ -1348,8 +1366,6 @@ export class OfficeState {
             y: 0,
           })
         }
-      } else {
-        ch.codeSnippets = []
       }
     }
     // Remove characters that finished despawn

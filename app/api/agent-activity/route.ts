@@ -9,11 +9,23 @@ const SESSION_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_PARENT_SESSIONS_TO_PARSE = 40
 const ORPHAN_FALLBACK_WINDOW_MS = 15 * 60 * 1000
 const SUBAGENT_MAX_ACTIVE_MS = 30 * 60 * 1000
+const SUBAGENT_ACTIVITY_EVENT_LIMIT = 6
+const SUBAGENT_ACTIVITY_TEXT_MAX_LEN = 80
+
+type SessionsIndex = Record<string, { sessionId?: string; updatedAt?: number }>
+
+export interface SubagentActivityEvent {
+  key: string
+  text: string
+  at: number
+}
 
 export interface SubagentInfo {
   toolId: string
   label: string
   sessionKey?: string
+  childSessionKey?: string
+  activityEvents?: SubagentActivityEvent[]
 }
 
 export interface AgentActivity {
@@ -81,13 +93,198 @@ function parseRecordTimestamp(record: unknown): number {
   return 0
 }
 
-async function parseSubagentsFromSessionFile(filePath: string, sessionKey: string): Promise<SubagentInfo[]> {
+function normalizeActivityText(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const compact = raw.replace(/\s+/g, ' ').trim()
+  if (!compact) return null
+  return compact.length > SUBAGENT_ACTIVITY_TEXT_MAX_LEN
+    ? `${compact.slice(0, SUBAGENT_ACTIVITY_TEXT_MAX_LEN - 1)}…`
+    : compact
+}
+
+function extractChildSessionKeyFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const data = payload as Record<string, unknown>
+  const direct = data.childSessionKey
+  if (typeof direct === 'string' && direct.includes(':subagent:')) return direct
+
+  const details = data.details
+  if (details && typeof details === 'object') {
+    const fromDetails = (details as Record<string, unknown>).childSessionKey
+    if (typeof fromDetails === 'string' && fromDetails.includes(':subagent:')) return fromDetails
+  }
+  return null
+}
+
+function extractChildSessionKeyFromText(rawText: unknown): string | null {
+  if (typeof rawText !== 'string' || !rawText.trim()) return null
+  try {
+    const parsed = JSON.parse(rawText)
+    return extractChildSessionKeyFromPayload(parsed)
+  } catch {
+    const match = rawText.match(/agent:[^:\s]+:subagent:[a-f0-9-]+/i)
+    return match ? match[0] : null
+  }
+}
+
+function extractChildSessionKeyFromToolResultMessage(message: unknown): string | null {
+  if (!message || typeof message !== 'object') return null
+  const msg = message as Record<string, unknown>
+  const fromPayload = extractChildSessionKeyFromPayload(msg)
+  if (fromPayload) return fromPayload
+
+  const content = msg.content
+  if (!Array.isArray(content)) return null
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue
+    const text = (block as Record<string, unknown>).text
+    const fromText = extractChildSessionKeyFromText(text)
+    if (fromText) return fromText
+  }
+  return null
+}
+
+function getSubagentSessionIdFromKey(sessionKey: string): string | null {
+  const idx = sessionKey.indexOf(':subagent:')
+  if (idx < 0) return null
+  const sessionId = sessionKey.slice(idx + ':subagent:'.length).trim()
+  return sessionId || null
+}
+
+function resolveSubagentSessionId(
+  childSessionKey: string,
+  sessionsIndex?: SessionsIndex,
+): string | null {
+  const fromIndex = sessionsIndex?.[childSessionKey]?.sessionId
+  if (typeof fromIndex === 'string' && fromIndex.trim()) return fromIndex.trim()
+  return getSubagentSessionIdFromKey(childSessionKey)
+}
+
+async function parseSubagentActivityEvents(
+  agentSessionsDir: string,
+  childSessionKey: string,
+  sessionsIndex?: SessionsIndex,
+): Promise<SubagentActivityEvent[]> {
+  const sessionId = resolveSubagentSessionId(childSessionKey, sessionsIndex)
+  if (!sessionId) return []
+  const transcriptPath = path.join(agentSessionsDir, `${sessionId}.jsonl`)
+  if (!existsSync(transcriptPath)) return []
+
+  try {
+    const content = await fs.readFile(transcriptPath, 'utf8')
+    const lines = content.split('\n').filter(l => l.trim())
+    const events: SubagentActivityEvent[] = []
+    for (let i = 0; i < lines.length; i++) {
+      let record: any
+      try {
+        record = JSON.parse(lines[i])
+      } catch {
+        continue
+      }
+      if (record?.type !== 'message' || !record?.message) continue
+      const at = parseRecordTimestamp(record)
+      const msg = record.message
+      const role = typeof msg.role === 'string' ? msg.role : ''
+      const blocks = Array.isArray(msg.content) ? msg.content : []
+      if (role === 'assistant') {
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const block = blocks[bi]
+          if (!block || typeof block !== 'object') continue
+          const b = block as Record<string, unknown>
+
+          if ((b.type === 'toolCall' || b.type === 'tool_use') && typeof b.name === 'string' && b.name) {
+            events.push({
+              key: `${record.id || i}:tool:${b.id || bi}`,
+              text: `tool: ${b.name}`,
+              at,
+            })
+            continue
+          }
+
+          if (b.type === 'text') {
+            const normalized = normalizeActivityText(b.text)
+            if (!normalized) continue
+            events.push({
+              key: `${record.id || i}:msg:${bi}`,
+              text: normalized,
+              at,
+            })
+          }
+        }
+        continue
+      }
+
+      if (role === 'toolResult') {
+        const toolName = typeof msg.toolName === 'string' ? msg.toolName.trim() : ''
+        const details = (msg.details && typeof msg.details === 'object')
+          ? (msg.details as Record<string, unknown>)
+          : null
+        const status = typeof details?.status === 'string' ? details.status : ''
+        if (toolName) {
+          const statusTail = status ? ` (${status})` : ''
+          events.push({
+            key: `${record.id || i}:result:${msg.toolCallId || ''}`,
+            text: `result: ${toolName}${statusTail}`,
+            at,
+          })
+        }
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const block = blocks[bi]
+          if (!block || typeof block !== 'object') continue
+          const normalized = normalizeActivityText((block as Record<string, unknown>).text)
+          if (!normalized) continue
+          events.push({
+            key: `${record.id || i}:result-text:${bi}`,
+            text: normalized,
+            at,
+          })
+        }
+        continue
+      }
+
+      if (role === 'user') {
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const block = blocks[bi]
+          if (!block || typeof block !== 'object') continue
+          const normalized = normalizeActivityText((block as Record<string, unknown>).text)
+          if (!normalized) continue
+          events.push({
+            key: `${record.id || i}:user:${bi}`,
+            text: `task: ${normalized}`,
+            at,
+          })
+        }
+      }
+    }
+
+    events.sort((a, b) => a.at - b.at)
+    const deduped: SubagentActivityEvent[] = []
+    const recentTextAt = new Map<string, number>()
+    for (const event of events) {
+      const lastAt = recentTextAt.get(event.text)
+      // Skip near-duplicate text emitted within 1.5s from the same subagent timeline.
+      if (typeof lastAt === 'number' && Math.abs(event.at - lastAt) <= 1500) continue
+      recentTextAt.set(event.text, event.at)
+      deduped.push(event)
+    }
+    return deduped.slice(-SUBAGENT_ACTIVITY_EVENT_LIMIT)
+  } catch {
+    return []
+  }
+}
+
+async function parseSubagentsFromSessionFile(
+  agentSessionsDir: string,
+  filePath: string,
+  sessionKey: string,
+  sessionsIndex?: SessionsIndex,
+): Promise<SubagentInfo[]> {
   const subagents: SubagentInfo[] = []
   try {
     const content = await fs.readFile(filePath, 'utf8')
     const lines = content.split('\n').filter(l => l.trim())
 
-    const activeSubtasks = new Map<string, { label: string; at: number }>()
+    const activeSubtasks = new Map<string, { label: string; at: number; childSessionKey?: string }>()
     const spawnToolIds = new Set<string>()
 
     for (const line of lines) {
@@ -113,7 +310,15 @@ async function parseSubagentsFromSessionFile(filePath: string, sessionKey: strin
         if (record.type === 'user' && record.message?.content) {
           const blocks = Array.isArray(record.message.content) ? record.message.content : []
           for (const block of blocks) {
-            if (block.type === 'tool_result' && block.tool_use_id && !spawnToolIds.has(block.tool_use_id)) {
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              if (spawnToolIds.has(block.tool_use_id)) {
+                const childSessionKey = extractChildSessionKeyFromToolResultMessage(block)
+                if (childSessionKey && activeSubtasks.has(block.tool_use_id)) {
+                  const prev = activeSubtasks.get(block.tool_use_id)!
+                  activeSubtasks.set(block.tool_use_id, { ...prev, childSessionKey })
+                }
+                continue
+              }
               activeSubtasks.delete(block.tool_use_id)
             }
           }
@@ -140,6 +345,14 @@ async function parseSubagentsFromSessionFile(filePath: string, sessionKey: strin
           } else if (role === 'toolResult') {
             const toolCallId = typeof msg.toolCallId === 'string' ? msg.toolCallId : ''
             const toolName = typeof msg.toolName === 'string' ? msg.toolName : ''
+            if (toolCallId && spawnToolIds.has(toolCallId)) {
+              const childSessionKey = extractChildSessionKeyFromToolResultMessage(msg)
+              if (childSessionKey && activeSubtasks.has(toolCallId)) {
+                const prev = activeSubtasks.get(toolCallId)!
+                activeSubtasks.set(toolCallId, { ...prev, childSessionKey })
+              }
+              continue
+            }
             if (toolCallId && !isSpawnTool(toolName) && !spawnToolIds.has(toolCallId)) {
               activeSubtasks.delete(toolCallId)
             }
@@ -167,7 +380,17 @@ async function parseSubagentsFromSessionFile(filePath: string, sessionKey: strin
     for (const [toolId, state] of activeSubtasks.entries()) {
       if (state.at > 0 && now - state.at > SUBAGENT_MAX_ACTIVE_MS) continue
       const label = state.label
-      subagents.push({ toolId, label, sessionKey })
+      let activityEvents: SubagentActivityEvent[] | undefined
+      if (state.childSessionKey) {
+        activityEvents = await parseSubagentActivityEvents(agentSessionsDir, state.childSessionKey, sessionsIndex)
+      }
+      subagents.push({
+        toolId,
+        label,
+        sessionKey,
+        childSessionKey: state.childSessionKey,
+        activityEvents: activityEvents && activityEvents.length > 0 ? activityEvents : undefined,
+      })
     }
   } catch {
     // Ignore parse errors
@@ -183,11 +406,12 @@ async function parseSubagents(agentSessionsDir: string, agentId: string): Promis
     const sessionFiles: Array<{ sessionKey: string; filePath: string; updatedAt: number }> = []
     const knownFilePaths = new Set<string>()
     const subagentSessionIds = new Set<string>()
+    let sessionsIndex: SessionsIndex = {}
     const sessionsIndexPath = path.join(agentSessionsDir, 'sessions.json')
     if (existsSync(sessionsIndexPath)) {
       try {
         const sessionsIndexRaw = await fs.readFile(sessionsIndexPath, 'utf8')
-        const sessionsIndex = JSON.parse(sessionsIndexRaw) as Record<string, { sessionId?: string; updatedAt?: number }>
+        sessionsIndex = JSON.parse(sessionsIndexRaw) as SessionsIndex
         for (const [sessionKey, meta] of Object.entries(sessionsIndex)) {
           if (!meta || typeof meta.sessionId !== 'string' || !meta.sessionId) continue
           if (sessionKey.includes(':subagent:')) {
@@ -242,7 +466,7 @@ async function parseSubagents(agentSessionsDir: string, agentId: string): Promis
 
     sessionFiles.sort((a, b) => b.updatedAt - a.updatedAt)
     const candidates = sessionFiles.slice(0, MAX_PARENT_SESSIONS_TO_PARSE)
-    const nested = await Promise.all(candidates.map((s) => parseSubagentsFromSessionFile(s.filePath, s.sessionKey)))
+    const nested = await Promise.all(candidates.map((s) => parseSubagentsFromSessionFile(agentSessionsDir, s.filePath, s.sessionKey, sessionsIndex)))
     const dedupe = new Set<string>()
     for (const list of nested) {
       for (const sub of list) {
