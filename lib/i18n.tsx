@@ -13,6 +13,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // nav sidebar
     "nav.overview": "總覽",
     "nav.agents": "機器人",
+    "nav.hermes": "Hermes研究",
     "nav.collab": "多Agent協作",
     "nav.models": "模型列表",
     "nav.monitor": "監控",
@@ -302,6 +303,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // nav sidebar
     "nav.overview": "总览",
     "nav.agents": "机器人",
+    "nav.hermes": "Hermes研究",
     "nav.collab": "多Agent协作",
     "nav.models": "模型列表",
     "nav.monitor": "监控",
@@ -591,6 +593,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // nav sidebar
     "nav.overview": "Overview",
     "nav.agents": "Bots",
+    "nav.hermes": "Hermes Research",
     "nav.collab": "Multi-Agent Collab",
     "nav.models": "Models",
     "nav.monitor": "Monitor",

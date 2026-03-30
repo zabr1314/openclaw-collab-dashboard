@@ -10,7 +10,7 @@ const BUGS_ENABLED_KEY = "pixel-office-bugs-enabled";
 const BUGS_COUNT_KEY = "pixel-office-bugs-count";
 const BUGS_MAX = 400;
 
-type NavIconName = "agents" | "pixelOffice" | "models" | "sessions" | "stats" | "alerts" | "skills" | "collab";
+type NavIconName = "agents" | "pixelOffice" | "models" | "sessions" | "stats" | "alerts" | "skills" | "collab" | "hermes";
 type PixelTone = "base" | "shade" | "light";
 type PixelRect = { x: number; y: number; w?: number; h?: number; tone?: PixelTone; opacity?: number };
 type PixelPalette = { base: string; shade: string; light: string };
@@ -194,6 +194,21 @@ function NavPixelIcon({ name, active }: { name: NavIconName; active: boolean }) 
           ]}
         />
       );
+    case "hermes":
+      return (
+        <PixelSvg
+          className={baseClass}
+          palette={palette}
+          pixels={[
+            { x: 7, y: 1, w: 2, h: 2, tone: "light" },
+            { x: 6, y: 3, w: 4, h: 3, tone: "base" },
+            { x: 3, y: 7, w: 3, h: 3, tone: "shade" },
+            { x: 10, y: 7, w: 3, h: 3, tone: "shade" },
+            { x: 7, y: 11, w: 2, h: 3, tone: "base" },
+            { x: 5, y: 6, w: 6, h: 1, tone: "light", opacity: 0.7 },
+          ]}
+        />
+      );
   }
 }
 
@@ -222,6 +237,7 @@ const NAV_ITEMS: { group: string; items: { href: string; icon: NavIconName; labe
     group: "nav.overview",
     items: [
       { href: "/", icon: "agents", labelKey: "nav.agents" },
+      { href: "/hermes", icon: "hermes", labelKey: "nav.hermes" },
       { href: "/collab", icon: "collab", labelKey: "nav.collab" },
       { href: "/pixel-office", icon: "pixelOffice", labelKey: "nav.pixelOffice" },
       { href: "/models", icon: "models", labelKey: "nav.models" },
