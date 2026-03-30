@@ -6,7 +6,7 @@ export type TaskStatus = "pending" | "running" | "done" | "failed" | "cancelled"
 
 export type StepStatus = "waiting" | "running" | "done" | "failed" | "skipped";
 
-export type ExecutionMode = "sequential" | "parallel";
+export type ExecutionMode = "sequential" | "parallel" | "dialogue";
 
 /** 协作任务中单个 agent 的步骤 */
 export interface CollabStep {
@@ -36,6 +36,8 @@ export interface CollabTask {
   startedAt?: number;
   finishedAt?: number;
   finalOutput?: string;     // 汇总后的最终输出
+  dialogueRounds?: number;  // 对话模式：轮次数（默认 3）
+  dialogueHistory?: string[]; // 对话历史记录
 }
 
 /** SSE 推送的事件类型 */
@@ -69,4 +71,5 @@ export interface CreateCollabTaskRequest {
     role: AgentRole;
     prompt: string;
   }>;
+  dialogueRounds?: number;
 }

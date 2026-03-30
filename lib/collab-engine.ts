@@ -52,6 +52,7 @@ export function createTask(req: CreateCollabTaskRequest, agentMeta: Record<strin
     steps,
     status: "pending",
     createdAt: Date.now(),
+    dialogueRounds: req.dialogueRounds,
   };
   saveTask(task);
   return task;
@@ -119,8 +120,7 @@ export async function runTask(taskId: string) {
         prevOutput = await runStep(task, step, prevOutput);
       }
       task.finalOutput = prevOutput;
-    } else {
-      // 并行模式：所有 step 同时执行，输入都是 goal
+    } else if (task.mode === "parallel") {
       const results = await Promise.allSettled(
         task.steps.map((step) => runStep(task, step, task.goal))
       );
@@ -130,6 +130,23 @@ export async function runTask(taskId: string) {
           : `[${task.steps[i].agentEmoji} ${task.steps[i].agentName}]\n❌ ${(r as PromiseRejectedResult).reason?.message}`
       );
       task.finalOutput = outputs.join("\n\n---\n\n");
+    } else if (task.mode === "dialogue") {
+      // 对话模式：agents 轮流发言
+      const rounds = task.dialogueRounds || 3;
+      task.dialogueHistory = [];
+      let context = `初始话题：${task.goal}`;
+
+      for (let round = 0; round < rounds; round++) {
+        for (const step of task.steps) {
+          const prompt = `${context}\n\n请针对以上对话内容发表你的观点（第 ${round + 1}/${rounds} 轮）`;
+          const output = await runStep(task, step, prompt);
+          const message = `[${step.agentEmoji} ${step.agentName}]: ${output}`;
+          task.dialogueHistory.push(message);
+          context += `\n\n${message}`;
+          saveTask(task);
+        }
+      }
+      task.finalOutput = task.dialogueHistory.join("\n\n");
     }
 
     task.status = "done";

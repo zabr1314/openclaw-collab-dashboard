@@ -21,6 +21,7 @@ export default function CollabPage() {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState<ExecutionMode>("sequential");
+  const [dialogueRounds, setDialogueRounds] = useState(3);
   const [steps, setSteps] = useState<Array<{ agentId: string; role: AgentRole; prompt: string }>>([
     { agentId: "", role: "researcher", prompt: "" },
   ]);
@@ -66,7 +67,13 @@ export default function CollabPage() {
       const res = await fetch("/api/collab/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, goal, mode, steps }),
+        body: JSON.stringify({
+          title,
+          goal,
+          mode,
+          steps,
+          dialogueRounds: mode === "dialogue" ? dialogueRounds : undefined
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -115,7 +122,25 @@ export default function CollabPage() {
               <input type="radio" checked={mode === "parallel"} onChange={() => setMode("parallel")} />
               <span className="text-sm">并行（所有 agent 同时执行）</span>
             </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" checked={mode === "dialogue"} onChange={() => setMode("dialogue")} />
+              <span className="text-sm">对话（agents 轮流发言）</span>
+            </label>
           </div>
+
+          {mode === "dialogue" && (
+            <div className="flex items-center gap-2">
+              <label className="text-sm">对话轮次：</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={dialogueRounds}
+                onChange={(e) => setDialogueRounds(Number(e.target.value))}
+                className="w-20 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[var(--text)]"
+              />
+            </div>
+          )}
 
           {steps.map((step, idx) => (
             <div key={idx} className="p-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] space-y-2">
